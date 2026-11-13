@@ -37,7 +37,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
 
       final data = jsonDecode(response.body);
-
+      if (!mounted) return;
       if (response.statusCode == 201 || response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Đăng ký thành công! Vui lòng đăng nhập.')),
@@ -53,7 +53,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         SnackBar(content: Text('Lỗi kết nối máy chủ: $e')),
       );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
