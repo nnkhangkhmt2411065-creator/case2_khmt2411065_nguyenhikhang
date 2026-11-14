@@ -26,6 +26,30 @@ class _TaskListScreenState extends State<TaskListScreen> {
     _loadTasks();
   }
 
+  Future<String> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+
+    if (token == null || token.isEmpty) {
+      throw Exception('Vui lòng đăng nhập lại');
+    }
+
+    return token;
+  }
+
+  String? _getUserId(dynamic value) {
+    if (value is Map) {
+      return (value['_id'] ?? value['id'])?.toString();
+    }
+    return value?.toString();
+  }
+
+  String _getUserName(Map<String, dynamic> user) {
+    final name = user['fullName']?.toString().trim() ?? '';
+    if (name.isNotEmpty) return name;
+    return user['email']?.toString() ?? 'Người dùng';
+  }
+
   // E2 - Lấy danh sách người dùng để giao việc.
   Future<List<Map<String, dynamic>>> _loadUsers() async {
     final prefs = await SharedPreferences.getInstance();
@@ -52,7 +76,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
   // Lấy danh sách công việc từ MongoDB.
   Future<void> _loadTasks() async {
     try {
-      final response = await ApiClient.get('/api/tasks');
+      final token = await _getAuthToken();
+      final response = await ApiClient.get('/api/tasks', token: token);
 
       if (response.statusCode != 200) {
         throw Exception('Không thể tải danh sách công việc');
@@ -287,6 +312,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     });
 
                     try {
+                      final token = await _getAuthToken();
                       final response = await ApiClient.post(
                         '/api/tasks',
                         {
@@ -298,6 +324,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
                               selectedDate!.toIso8601String(),
                             ),
                         },
+                        token: token,
                       );
 
                       if (response.statusCode != 201) {
@@ -367,24 +394,58 @@ class _TaskListScreenState extends State<TaskListScreen> {
       return;
     }
 
-    final assigned = task['assignedTo'];
-    String? selectedUserId;
-
-    if (assigned is Map) {
-      selectedUserId = assigned['_id']?.toString();
-    } else if (assigned != null) {
-      selectedUserId = assigned.toString();
+    String? getId(dynamic value) {
+      if (value == null) return null;
+      if (value is Map) return value['_id']?.toString();
+      return value.toString();
     }
 
-    // Dropdown chỉ nhận giá trị nằm trong danh sách hiện có.
-    if (!users.any((user) => user['_id']?.toString() == selectedUserId)) {
-      selectedUserId = null;
+    final selectedUserIds = <String>{};
+    final savedAssignees = task['assigneeIds'];
+
+    if (savedAssignees is List) {
+      for (final assignee in savedAssignees) {
+        final userId = getId(assignee);
+        if (userId != null && userId.isNotEmpty) {
+          selectedUserIds.add(userId);
+        }
+      }
+    }
+
+    // Giữ người được giao của công việc cũ nếu chưa có assigneeIds.
+    if (selectedUserIds.isEmpty) {
+      final oldAssigneeId = getId(task['assignedTo']);
+      if (oldAssigneeId != null && oldAssigneeId.isNotEmpty) {
+        selectedUserIds.add(oldAssigneeId);
+      }
+    }
+
+    String? selectedPrimaryUserId = getId(task['primaryAssigneeId']);
+
+    if (!selectedUserIds.contains(selectedPrimaryUserId)) {
+      final oldAssigneeId = getId(task['assignedTo']);
+      selectedPrimaryUserId = selectedUserIds.contains(oldAssigneeId)
+          ? oldAssigneeId
+          : (selectedUserIds.isEmpty ? null : selectedUserIds.first);
     }
 
     String selectedStatus = task['status']?.toString() ?? 'pending';
 
     if (!['pending', 'in-progress', 'completed'].contains(selectedStatus)) {
       selectedStatus = 'pending';
+    }
+
+    String userLabel(String userId) {
+      for (final user in users) {
+        if (getId(user) == userId) {
+          final name = user['fullName']?.toString().trim() ?? '';
+          final email = user['email']?.toString() ?? '';
+
+          if (name.isNotEmpty) return name;
+          if (email.isNotEmpty) return email;
+        }
+      }
+      return 'Người dùng';
     }
 
     bool isSaving = false;
@@ -395,99 +456,125 @@ class _TaskListScreenState extends State<TaskListScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
+              scrollable: true,
               title: const Text('Chỉnh sửa công việc'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Tên công việc',
-                        border: OutlineInputBorder(),
-                      ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tên công việc',
+                      border: OutlineInputBorder(),
                     ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedUserId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Người được giao',
-                        border: OutlineInputBorder(),
-                      ),
-                      hint: const Text('Chưa giao cho ai'),
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: '',
-                          child: Text('Chưa giao cho ai'),
+                  ),
+                  const SizedBox(height: 16),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Chọn người được giao'),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: users.map((user) {
+                      final userId = getId(user);
+
+                      if (userId == null || userId.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          userLabel(userId),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        ...users.map(
-                              (user) => DropdownMenuItem<String>(
-                            value: user['_id'].toString(),
-                            child: Text(
-                              (user['fullName']
-                                  ?.toString()
-                                  .trim()
-                                  .isNotEmpty ??
-                                  false)
-                                  ? user['fullName'].toString()
-                                  : (user['email']?.toString() ??
-                                  'Người dùng'),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                        setDialogState(() {
-                          selectedUserId =
-                          value == '' ? null : value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedStatus,
-                      decoration: const InputDecoration(
-                        labelText: 'Trạng thái',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'pending',
-                          child: Text('Chưa làm'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'in-progress',
-                          child: Text('Đang làm'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'completed',
-                          child: Text('Hoàn thành'),
-                        ),
-                      ],
-                      onChanged: isSaving
-                          ? null
-                          : (value) {
-                        if (value != null) {
+                        value: selectedUserIds.contains(userId),
+                        onChanged: isSaving
+                            ? null
+                            : (checked) {
                           setDialogState(() {
-                            selectedStatus = value;
+                            if (checked == true) {
+                              selectedUserIds.add(userId);
+                              selectedPrimaryUserId ??= userId;
+                            } else {
+                              selectedUserIds.remove(userId);
+
+                              if (selectedPrimaryUserId == userId) {
+                                selectedPrimaryUserId =
+                                selectedUserIds.isEmpty
+                                    ? null
+                                    : selectedUserIds.first;
+                              }
+                            }
                           });
-                        }
-                      },
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedPrimaryUserId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Người phụ trách chính',
+                      border: OutlineInputBorder(),
                     ),
-                  ],
-                ),
+                    hint: const Text('Chọn người phụ trách chính'),
+                    items: selectedUserIds.map((userId) {
+                      return DropdownMenuItem<String>(
+                        value: userId,
+                        child: Text(
+                          userLabel(userId),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: isSaving || selectedUserIds.isEmpty
+                        ? null
+                        : (value) {
+                      setDialogState(() {
+                        selectedPrimaryUserId = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedStatus,
+                    decoration: const InputDecoration(
+                      labelText: 'Trạng thái',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'pending',
+                        child: Text('Chưa làm'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'in-progress',
+                        child: Text('Đang làm'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'completed',
+                        child: Text('Hoàn thành'),
+                      ),
+                    ],
+                    onChanged: isSaving
+                        ? null
+                        : (value) {
+                      if (value != null) {
+                        setDialogState(() {
+                          selectedStatus = value;
+                        });
+                      }
+                    },
+                  ),
+                ],
               ),
               actions: [
                 TextButton(
                   onPressed: isSaving
                       ? null
-                      : () {
-                    Navigator.pop(dialogContext);
-                  },
+                      : () => Navigator.pop(dialogContext),
                   child: const Text('Hủy'),
                 ),
                 ElevatedButton(
@@ -499,6 +586,15 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     if (title.isEmpty) {
                       _showMessage(
                         'Vui lòng nhập tên công việc',
+                        isError: true,
+                      );
+                      return;
+                    }
+
+                    if (selectedUserIds.isNotEmpty &&
+                        selectedPrimaryUserId == null) {
+                      _showMessage(
+                        'Vui lòng chọn người phụ trách chính',
                         isError: true,
                       );
                       return;
@@ -521,7 +617,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
                         '/api/tasks/${task['_id']}',
                         {
                           'title': title,
-                          'assignedTo': selectedUserId,
+                          'assigneeIds': selectedUserIds.toList(),
+                          'primaryAssigneeId': selectedPrimaryUserId,
                           'status': selectedStatus,
                         },
                         token: token,
@@ -587,9 +684,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
     });
 
     try {
+      final token = await _getAuthToken();
       final response = await ApiClient.put(
         '/api/tasks/$id',
         {'status': newStatus},
+        token: token,
       );
 
       if (response.statusCode != 200) {
@@ -669,6 +768,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
               icon: const Icon(Icons.edit),
               label: const Text('Chỉnh sửa'),
             ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _showShareDialog(task);
+              },
+              icon: const Icon(Icons.share),
+              label: const Text('Chia sẻ'),
+            ),
             TextButton(
               onPressed: () {
                 Navigator.pop(dialogContext);
@@ -691,6 +798,274 @@ class _TaskListScreenState extends State<TaskListScreen> {
     );
   }
 
+  // Quản lý người được chia sẻ và quyền truy cập.
+  Future<void> _showShareDialog(Map<String, dynamic> task) async {
+    final taskId = task['_id']?.toString();
+    if (taskId == null || taskId.isEmpty) {
+      _showMessage('Không tìm thấy mã công việc', isError: true);
+      return;
+    }
+
+    List<Map<String, dynamic>> users = [];
+    List<Map<String, dynamic>> shares = [];
+
+    try {
+      final token = await _getAuthToken();
+      users = await _loadUsers();
+
+      final response = await ApiClient.get(
+        '/api/tasks/$taskId/shares',
+        token: token,
+      );
+      if (response.statusCode != 200) {
+        throw Exception(response.body);
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      shares = (data['shares'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+    } catch (error) {
+      _showMessage('Không thể tải danh sách chia sẻ: $error', isError: true);
+      return;
+    }
+
+    if (!mounted) return;
+
+    String? selectedUserId;
+    String selectedPermission = 'viewer';
+    bool isSaving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> reloadShares() async {
+              final token = await _getAuthToken();
+              final response = await ApiClient.get(
+                '/api/tasks/$taskId/shares',
+                token: token,
+              );
+              if (response.statusCode != 200) {
+                throw Exception(response.body);
+              }
+              final data = jsonDecode(response.body) as Map<String, dynamic>;
+              setDialogState(() {
+                shares = (data['shares'] as List<dynamic>? ?? [])
+                    .map((item) => Map<String, dynamic>.from(item as Map))
+                    .toList();
+              });
+            }
+
+            Future<void> changeShare(String shareId, String action) async {
+              try {
+                final token = await _getAuthToken();
+                final response = action == 'revoke'
+                    ? await ApiClient.delete(
+                  '/api/tasks/$taskId/shares/$shareId',
+                  token: token,
+                )
+                    : await ApiClient.patch(
+                  '/api/tasks/$taskId/shares/$shareId',
+                  {'permission': action},
+                  token: token,
+                );
+
+                if (response.statusCode != 200) {
+                  throw Exception(response.body);
+                }
+
+                await reloadShares();
+                if (mounted) {
+                  _showMessage(
+                    action == 'revoke'
+                        ? 'Đã thu hồi quyền chia sẻ'
+                        : 'Đã cập nhật quyền chia sẻ',
+                  );
+                }
+              } catch (error) {
+                if (mounted) {
+                  _showMessage('Lỗi cập nhật chia sẻ: $error', isError: true);
+                }
+              }
+            }
+
+            return AlertDialog(
+              scrollable: true,
+              title: const Text('Chia sẻ công việc'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedUserId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Chọn người dùng',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: users.map((user) {
+                      final userId = _getUserId(user);
+                      if (userId == null || userId.isEmpty) return null;
+                      return DropdownMenuItem<String>(
+                        value: userId,
+                        child: Text(
+                          _getUserName(user),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).whereType<DropdownMenuItem<String>>().toList(),
+                    onChanged: isSaving
+                        ? null
+                        : (value) => setDialogState(() {
+                      selectedUserId = value;
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedPermission,
+                    decoration: const InputDecoration(
+                      labelText: 'Quyền truy cập',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'viewer',
+                        child: Text('Chỉ xem (viewer)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'editor',
+                        child: Text('Được chỉnh sửa (editor)'),
+                      ),
+                    ],
+                    onChanged: isSaving
+                        ? null
+                        : (value) {
+                      if (value != null) {
+                        setDialogState(() {
+                          selectedPermission = value;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      onPressed: isSaving || selectedUserId == null
+                          ? null
+                          : () async {
+                        setDialogState(() {
+                          isSaving = true;
+                        });
+                        try {
+                          final token = await _getAuthToken();
+                          final response = await ApiClient.post(
+                            '/api/tasks/$taskId/shares',
+                            {
+                              'userId': selectedUserId,
+                              'permission': selectedPermission,
+                            },
+                            token: token,
+                          );
+                          if (response.statusCode != 200 &&
+                              response.statusCode != 201) {
+                            throw Exception(response.body);
+                          }
+                          await reloadShares();
+                          if (mounted) {
+                            _showMessage('Chia sẻ công việc thành công');
+                          }
+                        } catch (error) {
+                          if (mounted) {
+                            _showMessage(
+                              'Lỗi chia sẻ công việc: $error',
+                              isError: true,
+                            );
+                          }
+                        } finally {
+                          if (dialogContext.mounted) {
+                            setDialogState(() {
+                              isSaving = false;
+                            });
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.share),
+                      label: Text(isSaving ? 'Đang lưu...' : 'Chia sẻ'),
+                    ),
+                  ),
+                  const Divider(height: 24),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Người đang được chia sẻ',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  if (shares.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('Chưa chia sẻ công việc này với ai.'),
+                    ),
+                  ...shares.map((share) {
+                    final recipient = share['userId'];
+                    final shareId = share['_id']?.toString();
+                    final recipientName = recipient is Map
+                        ? _getUserName(Map<String, dynamic>.from(recipient))
+                        : 'Người dùng';
+                    final permission =
+                        share['permission']?.toString() ?? 'viewer';
+
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        recipientName,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        permission == 'editor' ? 'Được chỉnh sửa' : 'Chỉ xem',
+                      ),
+                      trailing: shareId == null
+                          ? null
+                          : PopupMenuButton<String>(
+                        tooltip: 'Quản lý quyền',
+                        onSelected: (action) {
+                          changeShare(shareId, action);
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'viewer',
+                            child: Text('Đổi thành chỉ xem'),
+                          ),
+                          PopupMenuItem(
+                            value: 'editor',
+                            child: Text('Cho phép chỉnh sửa'),
+                          ),
+                          PopupMenuItem(
+                            value: 'revoke',
+                            child: Text('Thu hồi chia sẻ'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Đóng'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   // Xóa công việc khỏi MongoDB.
   Future<void> _deleteTask(String? id) async {
     if (id == null || id.isEmpty) {
@@ -699,7 +1074,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
 
     try {
-      final response = await ApiClient.delete('/api/tasks/$id');
+      final token = await _getAuthToken();
+      final response = await ApiClient.delete(
+        '/api/tasks/$id',
+        token: token,
+      );
 
       if (response.statusCode != 200) {
         throw Exception('Không thể xóa công việc');
