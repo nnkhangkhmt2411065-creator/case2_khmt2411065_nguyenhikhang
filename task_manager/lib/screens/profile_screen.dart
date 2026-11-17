@@ -30,6 +30,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadProfile();
   }
 
+  // Xử lý phản hồi API an toàn
+  Map<String, dynamic> _parseResponse(
+      dynamic response, {
+        required String defaultMessage,
+      }) {
+    dynamic decoded;
+
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      throw Exception(
+        'Máy chủ trả về dữ liệu không hợp lệ '
+            '(HTTP ${response.statusCode}). '
+            'Vui lòng kiểm tra đường dẫn API.',
+      );
+    }
+
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Dữ liệu từ máy chủ không hợp lệ');
+    }
+
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300) {
+      throw Exception(
+        decoded['message']?.toString() ?? defaultMessage,
+      );
+    }
+
+    return decoded;
+  }
+
   // A4.1 - Lấy thông tin cá nhân từ MongoDB
   Future<void> _loadProfile() async {
     setState(() {
@@ -46,18 +77,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       final response = await ApiClient.get(
-        '/auth/profile',
+        '/api/auth/profile',
         token: token,
       );
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode != 200) {
-        throw Exception(
-          data['message']?.toString() ??
-              'Không thể tải thông tin cá nhân',
-        );
-      }
+      final data = _parseResponse(
+        response,
+        defaultMessage: 'Không thể tải thông tin cá nhân',
+      );
 
       final user = data['user'];
 
@@ -105,7 +132,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       final response = await ApiClient.put(
-        '/auth/profile',
+        '/api/auth/profile',
         {
           'fullName': _fullNameController.text.trim(),
           'email': _emailController.text.trim(),
@@ -113,14 +140,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         token: token,
       );
 
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode != 200) {
-        throw Exception(
-          data['message']?.toString() ??
-              'Không thể cập nhật thông tin',
-        );
-      }
+      final data = _parseResponse(
+        response,
+        defaultMessage: 'Không thể cập nhật thông tin',
+      );
 
       final user = data['user'];
 
@@ -257,7 +280,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 30),
 
-                  // Họ tên
+                  // Họ và tên
                   TextFormField(
                     controller: _fullNameController,
                     decoration: const InputDecoration(
@@ -307,8 +330,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   // A4 - Lưu thay đổi
                   ElevatedButton.icon(
-                    onPressed:
-                    _isSaving ? null : _updateProfile,
+                    onPressed: _isSaving
+                        ? null
+                        : _updateProfile,
                     icon: const Icon(Icons.save),
                     label: Text(
                       _isSaving

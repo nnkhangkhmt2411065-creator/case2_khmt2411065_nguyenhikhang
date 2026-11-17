@@ -1,7 +1,9 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import '../services/api_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/api_client.dart';
 
 class TaskActivityScreen extends StatefulWidget {
   final String taskId;
@@ -44,15 +46,21 @@ class _TaskActivityScreenState extends State<TaskActivityScreen> {
       );
 
       if (response.statusCode != 200) {
-        throw Exception('Không thể tải lịch sử hoạt động');
+        throw Exception(
+          'HTTP ${response.statusCode}: ${response.body}',
+        );
       }
 
       final data = jsonDecode(response.body);
 
+      if (data is! Map<String, dynamic> || data['activities'] is! List) {
+        throw Exception('Phản hồi API không đúng định dạng: ${response.body}');
+      }
+
       if (!mounted) return;
 
       setState(() {
-        activities = data['activities'] as List;
+        activities = data['activities'] as List<dynamic>;
         isLoading = false;
       });
     } catch (error) {
@@ -67,9 +75,12 @@ class _TaskActivityScreenState extends State<TaskActivityScreen> {
 
   String formatDate(dynamic value) {
     if (value == null) return '';
+
     final date = DateTime.tryParse(value.toString());
     if (date == null) return '';
+
     final local = date.toLocal();
+
     return '${local.day}/${local.month}/${local.year} '
         '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
@@ -90,49 +101,56 @@ class _TaskActivityScreenState extends State<TaskActivityScreen> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(errorMessage!),
-                      ElevatedButton(
-                        onPressed: loadActivities,
-                        child: const Text('Thử lại'),
-                      ),
-                    ],
-                  ),
-                )
-              : activities.isEmpty
-                  ? const Center(
-                      child: Text('Chưa có lịch sử hoạt động'),
-                    )
-                  : ListView.builder(
-                      itemCount: activities.length,
-                      itemBuilder: (context, index) {
-                        final activity = activities[index];
-                        final action = activity['action'];
+          ? Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                errorMessage!,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: loadActivities,
+                child: const Text('Thử lại'),
+              ),
+            ],
+          ),
+        ),
+      )
+          : activities.isEmpty
+          ? const Center(
+        child: Text('Chưa có lịch sử hoạt động'),
+      )
+          : ListView.builder(
+        itemCount: activities.length,
+        itemBuilder: (context, index) {
+          final activity = activities[index];
+          final action = activity['action'];
 
-                        return Card(
-                          margin: const EdgeInsets.all(8),
-                          child: ListTile(
-                            leading: Icon(
-                              action == 'created'
-                                  ? Icons.add_circle
-                                  : action == 'deleted'
-                                      ? Icons.delete
-                                      : Icons.edit,
-                            ),
-                            title: Text(
-                              activity['description']?.toString() ??
-                                  'Hoạt động',
-                            ),
-                            subtitle: Text(
-                              formatDate(activity['createdAt']),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+          final IconData icon = action == 'created'
+              ? Icons.add_circle
+              : action == 'deleted'
+              ? Icons.delete
+              : Icons.edit;
+
+          return Card(
+            margin: const EdgeInsets.all(8),
+            child: ListTile(
+              leading: Icon(icon),
+              title: Text(
+                activity['description']?.toString() ??
+                    'Hoạt động',
+              ),
+              subtitle: Text(
+                formatDate(activity['createdAt']),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

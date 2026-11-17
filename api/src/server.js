@@ -1,38 +1,62 @@
-require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
-const connectDB = require('./config/database');
+require('dotenv').config();
 
-const authRoutes = require('./routes/authRoutes');
-const taskRoutes = require('./routes/taskRoutes');
-const statisticsRoutes = require('./routes/statisticsRoutes');
+const connectDB = require('./config/database');
 const verifyToken = require('./middleware/authMiddleware');
 
-const taskActivityRoutes = require('./routes/taskActivityRoutes');
 const app = express();
 
+// Kết nối MongoDB
+connectDB();
+
+// Middleware chung
 app.use(cors());
 app.use(express.json());
 
-// Ket noi MongoDB
-connectDB();
-
-// API dang ky, dang nhap, thong tin tai khoan
-app.use('/auth', authRoutes);
-
-// API quan ly cong viec
-app.use('/tasks', taskRoutes);
-
-// API thong ke E1 - E3
-app.use('/statistics', verifyToken, statisticsRoutes);
-
-app.use('/task-activities', taskActivityRoutes);
-app.get('/', (req, res) => {
-  res.json({ message: 'TaskManager API is running' });
+app.use((req, res, next) => {
+  console.log(`[API] ${req.method} ${req.originalUrl}`);
+  next();
 });
 
+// API xác thực và tài khoản
+app.use('/api/auth', require('./routes/authRoutes'));
+
+// API công việc
+app.use(
+  '/api/tasks',
+  verifyToken,
+  require('./routes/taskRoutes')
+);
+
+// API lịch sử hoạt động
+app.use(
+  '/task-activities',
+  verifyToken,
+  require('./routes/taskActivityRoutes')
+);
+
+// API thông báo
+app.use(
+  '/api/notifications',
+  verifyToken,
+  require('./routes/notificationRoutes')
+);
+
+// API người dùng
+app.use('/api/users', require('./routes/userRoutes'));
+
+// API thống kê
+app.use('/statistics', require('./routes/statisticsRoutes'));
+
+// Kiểm tra server
+app.get('/', (req, res) => {
+  res.send('Server đang hoạt động thành công!');
+});
+
+// Khởi động server
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server đang chạy tại port ${PORT}`);
 });

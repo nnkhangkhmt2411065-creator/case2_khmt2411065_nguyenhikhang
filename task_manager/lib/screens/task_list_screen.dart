@@ -1,5 +1,5 @@
 import 'dart:convert';
-
+import 'notification_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -715,9 +715,31 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
-  // Xem chi tiết công việc.
-  void _showTaskDetails(int index) {
+  // Xem chi tiết công việc và chỉ hiển thị thao tác theo quyền.
+  Future<void> _showTaskDetails(int index) async {
+    if (index < 0 || index >= _tasks.length) return;
+
     final task = _tasks[index];
+    final prefs = await SharedPreferences.getInstance();
+    final currentUserId = prefs.getString('userId');
+
+    // Hỗ trợ các tên trường người tạo thường dùng trong dữ liệu task.
+    final owner = task['userId'] ?? task['createdBy'] ?? task['ownerId'];
+    final ownerId = _getUserId(owner);
+    final isOwner = currentUserId != null &&
+        ownerId != null &&
+        currentUserId == ownerId;
+
+    // API cần trả một trong các trường quyền này, giá trị viewer/editor.
+    final permission = (task['permission'] ??
+        task['sharePermission'] ??
+        task['sharedPermission'] ??
+        '')
+        .toString()
+        .toLowerCase();
+    final canEdit = isOwner || permission == 'editor';
+
+    if (!mounted) return;
 
     showDialog<void>(
       context: context,
@@ -738,9 +760,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
                     '${_getPriorityText(task['priority']?.toString())}',
               ),
               const SizedBox(height: 10),
-              Text(
-                'Hạn hoàn thành: ${_formatDate(task['dueDate'])}',
-              ),
+              Text('Hạn hoàn thành: ${_formatDate(task['dueDate'])}'),
             ],
           ),
           actions: [
@@ -760,38 +780,39 @@ class _TaskListScreenState extends State<TaskListScreen> {
               icon: const Icon(Icons.history),
               label: const Text('Lịch sử'),
             ),
-            TextButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _showEditTaskDialog(task);
-              },
-              icon: const Icon(Icons.edit),
-              label: const Text('Chỉnh sửa'),
-            ),
-            TextButton.icon(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _showShareDialog(task);
-              },
-              icon: const Icon(Icons.share),
-              label: const Text('Chia sẻ'),
-            ),
+            if (canEdit)
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _showEditTaskDialog(task);
+                },
+                icon: const Icon(Icons.edit),
+                label: const Text('Chỉnh sửa'),
+              ),
+            if (isOwner)
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _showShareDialog(task);
+                },
+                icon: const Icon(Icons.share),
+                label: const Text('Chia sẻ'),
+              ),
             TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Đóng'),
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _deleteTask(task['_id']?.toString());
-              },
-              child: const Text(
-                'Xóa',
-                style: TextStyle(color: Colors.red),
+            if (isOwner)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _deleteTask(task['_id']?.toString());
+                },
+                child: const Text(
+                  'Xóa',
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
-            ),
           ],
         );
       },
@@ -1091,12 +1112,38 @@ class _TaskListScreenState extends State<TaskListScreen> {
     }
   }
 
+  Future<void> _openNotifications() async {
+    final taskId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const NotificationScreen(),
+      ),
+    );
+
+    if (!mounted || taskId == null) return;
+
+    await _loadTasks();
+
+    final index = _tasks.indexWhere(
+          (task) => task['_id']?.toString() == taskId,
+    );
+
+    if (index >= 0 && mounted) {
+      _showTaskDetails(index);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Danh sách công việc'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_outlined),
+            tooltip: 'Thông báo',
+            onPressed: _openNotifications,
+          ),
           IconButton(
             icon: const Icon(Icons.bar_chart),
             tooltip: 'Thống kê',

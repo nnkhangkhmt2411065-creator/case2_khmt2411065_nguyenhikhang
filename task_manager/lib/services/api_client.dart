@@ -1,92 +1,88 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
-  static const String baseUrl = 'http://localhost:3000';
+  static String get baseUrl {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Android Emulator gọi server đang chạy trên máy tính qua địa chỉ này.
+      return 'http://10.0.2.2:3000';
+    }
 
-  // POST - Gửi dữ liệu lên server
+    // Chrome hoặc Windows desktop.
+    return 'http://localhost:3000';
+  }
+
+  static Map<String, String> _headers({String? token}) {
+    return {
+      'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+  }
+
+  static Uri _url(String endpoint) {
+    return Uri.parse('$baseUrl$endpoint');
+  }
+
+  // POST
   static Future<http.Response> post(
       String endpoint,
       Map<String, dynamic> body, {
         String? token,
-      }) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-
+      }) {
     return http.post(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      },
+      _url(endpoint),
+      headers: _headers(token: token),
       body: jsonEncode(body),
     );
   }
 
-  // GET - Lấy dữ liệu từ server
+  // GET
   static Future<http.Response> get(
       String endpoint, {
         String? token,
-      }) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-
+      }) {
     return http.get(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      },
+      _url(endpoint),
+      headers: _headers(token: token),
     );
   }
 
-  // PUT - Cập nhật dữ liệu trên server
+  // PUT
   static Future<http.Response> put(
       String endpoint,
       Map<String, dynamic> body, {
         String? token,
-      }) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-
+      }) {
     return http.put(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      },
+      _url(endpoint),
+      headers: _headers(token: token),
       body: jsonEncode(body),
     );
   }
 
-  // PATCH - Cập nhật một phần dữ liệu trên server
+  // PATCH
   static Future<http.Response> patch(
       String endpoint,
       Map<String, dynamic> body, {
         String? token,
-      }) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-
+      }) {
     return http.patch(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      },
+      _url(endpoint),
+      headers: _headers(token: token),
       body: jsonEncode(body),
     );
   }
 
-  // DELETE - Xóa dữ liệu trên server
+  // DELETE
   static Future<http.Response> delete(
       String endpoint, {
         String? token,
-      }) async {
-    final url = Uri.parse('$baseUrl$endpoint');
-
+      }) {
     return http.delete(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      },
+      _url(endpoint),
+      headers: _headers(token: token),
     );
   }
 }

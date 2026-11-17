@@ -40,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final response = await ApiClient.post(
-        '/auth/login',
+        '/api/auth/login',
         {
           'email': email,
           'password': password,

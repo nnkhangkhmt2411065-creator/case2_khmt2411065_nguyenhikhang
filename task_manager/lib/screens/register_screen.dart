@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
 import '../services/api_client.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -13,6 +15,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
   bool _isLoading = false;
 
   Future<void> _handleRegister() async {
@@ -30,27 +33,52 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await ApiClient.post('/auth/register', {
+      final response = await ApiClient.post('/api/auth/register', {
         'fullName': fullName,
         'email': email,
         'password': password,
       });
 
-      final data = jsonDecode(response.body);
-      if (!mounted) return;
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đăng ký thành công! Vui lòng đăng nhập.')),
-        );
-        Navigator.pop(context); // Quay lại màn hình đăng nhập
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? 'Đăng ký thất bại')),
+      dynamic decoded;
+
+      try {
+        decoded = jsonDecode(response.body);
+      } on FormatException {
+        debugPrint('Register response status: ${response.statusCode}');
+        debugPrint('Register response body: ${response.body}');
+
+        throw Exception(
+          'Server trả về trang HTML, không phải JSON '
+              '(HTTP ${response.statusCode}).',
         );
       }
-    } catch (e) {
+
+      final data = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Đăng ký thành công! Vui lòng đăng nhập.'),
+          ),
+        );
+
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              data['message']?.toString() ?? 'Đăng ký thất bại',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi kết nối máy chủ: $e')),
+        SnackBar(content: Text('Lỗi đăng ký: $error')),
       );
     } finally {
       if (mounted) {
@@ -60,14 +88,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Đăng ký tài khoản')),
+      appBar: AppBar(
+        title: const Text('Đăng ký tài khoản'),
+      ),
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: SingleChildScrollView(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TextField(
                 controller: _fullNameController,
@@ -79,20 +116,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
                   labelText: 'Email',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _passwordController,
+                obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Mật khẩu',
                   border: OutlineInputBorder(),
                 ),
-                obscureText: true,
               ),
               const SizedBox(height: 24),
               _isLoading
